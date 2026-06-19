@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+*.log
+node_modules/
+.backups/
+history.jsonl
+projects/
+tasks/
+telemetry/
+paste-cache/
+sessions/
+file-history/
+settings.json
+settings.local.json

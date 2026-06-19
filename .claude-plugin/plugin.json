@@ -1,0 +1,7 @@
+{
+  "name": "codex-claude-collab",
+  "description": "Lightweight file-based collaboration workflow for Claude Code and Codex with task archives, clarification, confirmation gates, review handoffs, and paste-ready prompts.",
+  "author": {
+    "name": "Tianfeng Hua"
+  }
+}
