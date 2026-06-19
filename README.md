@@ -1,17 +1,38 @@
 # Codex Claude Collab
 
-Lightweight file-based collaboration workflow for Claude Code and Codex.
+> Turn Claude Code and Codex into a calm, user-directed AI delivery team.
 
-This plugin helps Claude Code prepare structured task archives that can be reviewed or executed by Codex without creating an automatic agent loop. It keeps the user as dispatcher, requires explicit confirmation before formal execution, and generates paste-ready prompts for Codex handoff.
+**Codex Claude Collab** is a lightweight collaboration plugin for people who want Claude Code and Codex to work together without letting agents run wild.
+
+It gives Claude Code a disciplined workflow for creating task archives, clarifying requirements, confirming execution boundaries, handing work to Codex, and closing the loop with validation and rollback notes.
+
+No hidden automation. No surprise hooks. No agent-to-agent chaos.
+
+Just a clean operating system for:
+
+- turning fuzzy goals into executable task files,
+- forcing clarification before work starts,
+- keeping the user in charge,
+- sending Codex a paste-ready review prompt,
+- and preserving the evidence trail for what happened.
+
+## Why This Exists
+
+Claude Code is excellent at living inside a project: reading code, shaping PRDs, implementing changes, and validating runtime behavior.
+
+Codex is excellent at independent review: configuration governance, cross-file audits, rollback planning, safety checks, and spotting sharp edges.
+
+This plugin lets each tool do what it is good at while the user stays the dispatcher.
 
 ## What It Adds
 
-- Task archives under `reports/tasks/YYYYMMDD-HHMMSS-short-slug/`.
-- A clarification step before confirmation.
-- A hard pre-execution confirmation gate.
-- Readiness packages for Codex or Claude Code.
-- Paste-ready `CODEX_PROMPT.md` for Codex review or execution.
-- A read-only `collaboration-reviewer` agent for archive completeness review.
+- **Task archives** under `reports/tasks/YYYYMMDD-HHMMSS-short-slug/`.
+- **Requirement clarification** with at most 3 high-value questions.
+- **Pre-execution confirmation gates** so work cannot start from vague intent.
+- **Readiness packages** for Codex or Claude Code.
+- **Paste-ready `CODEX_PROMPT.md`** for Codex review or execution.
+- **Next prompt drafts** after every step so the user always knows what to say next.
+- **Read-only collaboration reviewer** for checking task archive completeness.
 
 ## Core Workflow
 
@@ -87,6 +108,46 @@ Optional files:
 
 Then paste the generated `CODEX_PROMPT.md` into Codex.
 
+## A Tiny Story
+
+You say:
+
+```text
+/task-start Improve login UX and reduce first-time login failures
+```
+
+Claude Code creates a draft archive, but it cannot start work yet.
+
+Then:
+
+```text
+/task-clarify reports/tasks/20260619-140000-login-ux
+```
+
+It asks only the important questions:
+
+- Are code changes allowed, or only a plan?
+- Can auth APIs change, or only the frontend?
+- What metric matters most?
+
+After you confirm:
+
+```text
+/task-confirm reports/tasks/20260619-140000-login-ux
+```
+
+Claude can implement. When it is time for independent review:
+
+```text
+/task-ready-for-codex reports/tasks/20260619-140000-login-ux
+```
+
+The plugin creates `CODEX_PROMPT.md`, a ready-to-paste prompt that tells Codex exactly what to inspect: scope, risks, validation gaps, rollback expectations, and secret-handling rules.
+
+Claude builds. Codex reviews. You decide.
+
+That is the whole point.
+
 ## Docs
 
 - `docs/workflow.md`
@@ -97,3 +158,18 @@ Then paste the generated `CODEX_PROMPT.md` into Codex.
 ## Privacy
 
 This plugin intentionally does not include local settings, logs, histories, backups, telemetry, project transcripts, or credentials.
+
+## Philosophy
+
+The goal is not to make agents autonomous.
+
+The goal is to make collaboration legible.
+
+Every task should have:
+
+- a clear goal,
+- an explicit owner,
+- confirmed boundaries,
+- validation evidence,
+- rollback notes,
+- and a next prompt the user can actually use.
