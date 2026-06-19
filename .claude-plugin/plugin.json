@@ -1,6 +1,6 @@
 {
   "name": "codex-claude-collab",
-  "description": "Lightweight file-based collaboration workflow for Claude Code and Codex with task archives, clarification, confirmation gates, review handoffs, and paste-ready prompts.",
+  "description": "A user-directed command layer for Claude Code and Codex collaboration with task archives, confirmation gates, review packets, rollback notes, and paste-ready cross-agent prompts.",
   "author": {
     "name": "Tianfeng Hua"
   }
