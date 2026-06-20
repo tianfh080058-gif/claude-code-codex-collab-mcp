@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cross-agent-gateway": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/cross-agent-gateway.mjs"],
+      "env": {
+        "CODEX_CLAUDE_COLLAB_DEFAULT_MODE": "auto"
+      }
+    }
+  }
+}
