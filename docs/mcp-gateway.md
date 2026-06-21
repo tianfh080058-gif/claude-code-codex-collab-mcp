@@ -9,10 +9,10 @@ Claude Code loads the gateway from the plugin `.mcp.json`. Codex loads the same 
 ## Quickstart For Real Projects
 
 1. Run `profile_project_risk` before changing a repository.
-2. Run `init_project_collab` with `developer_safe` for normal code work, or `config_governance` for configuration governance work.
+2. Run `list_user_mode_presets`, then `apply_user_mode_preset` with `solo_developer_safe` for normal code work, `config_governance` for configuration governance work, or `enterprise_review` for shared repositories.
 3. Run `analyze_requirement_clarity` or `request_clarification` before execution if the task may be ambiguous.
 4. Use `create_plan` and `approve_plan` for user-approved scope.
-5. Use `execute_approved_plan` or `implement_with_review` only after the task has scope, validation, rollback, and sensitive-area information.
+5. Use `execute_approved_plan`, `implement_with_review`, or `advance_task_loop` only after the task has scope, validation, rollback, and sensitive-area information.
 6. Use `get_dashboard_brief` while work is active, and `get_dashboard_detail` when a human needs the full state.
 7. Use `run_quality_gate` before closeout.
 
@@ -31,11 +31,13 @@ Danger mode does not bypass platform, account, sandbox, network, or operating-sy
 - Claude tool calls use `claude mcp serve` and proxy a named Claude MCP tool.
 - Task collaboration uses local `reports/tasks/` archives.
 
-The gateway can coordinate Claude Code CLI and Codex through programmable MCP/CLI surfaces. It does not directly operate a pre-existing Codex Desktop chat window. Codex Desktop can still participate as the user-facing workspace when it is configured to load this gateway for the trusted project; shared task archives, confirmations, audit events, and quality evidence remain the coordination record.
+The gateway can coordinate Claude Code CLI and Codex through programmable MCP/CLI surfaces. It does not directly operate a pre-existing Codex Desktop chat window, and Codex Desktop should not be treated as a fully remote-controlled background API. Codex Desktop can still participate as the user-facing workspace when it is configured to load this gateway for the trusted project; shared task archives, confirmations, audit events, and quality evidence remain the coordination record.
 
 ## Core Tools
 
 - `get_policy`
+- `list_user_mode_presets`
+- `apply_user_mode_preset`
 - `set_policy_mode`
 - `classify_risk`
 - `prepare_cross_agent_call`
@@ -69,6 +71,14 @@ The gateway can coordinate Claude Code CLI and Codex through programmable MCP/CL
 - `start_project_task`
 - `build_project_context_pack`
 - `run_quality_gate`
+- `list_task_mode_presets`
+- `get_task_mode_preset`
+- `build_execution_harness`
+- `build_next_prompt_draft`
+- `get_evidence_schema`
+- `evaluate_stop_condition`
+- `plan_review_fix_loop`
+- `record_loop_failure`
 - `get_user_dashboard`
 - `summarize_final_result`
 - `implement_with_review`
@@ -81,8 +91,15 @@ The gateway can coordinate Claude Code CLI and Codex through programmable MCP/CL
 - `start_collab_run`
 - `get_collab_run`
 - `advance_collab_run`
+- `advance_task_loop`
 - `record_run_evidence`
+- `record_human_approval`
+- `explain_missing_evidence`
 - `explain_pending_confirmation`
+- `get_pending_action_card`
+- `approve_next_action`
+- `deny_next_action`
+- `revise_next_action`
 - `approve_pending_call`
 - `deny_pending_call`
 - `request_plan_change`
@@ -155,6 +172,8 @@ For complex project work, prefer the high-level workflow tools over raw `call_co
 The gateway now has a middle layer between raw cross-agent calls and fully manual task archives:
 
 - `analyze_requirement_clarity` and `request_clarification` stop vague tasks before execution. They return a readiness status, confidence level, missing fields, safe defaults, and up to 3 questions.
+- `build_execution_harness`, `build_next_prompt_draft`, `get_evidence_schema`, and `evaluate_stop_condition` provide a unified Harness layer for scope, evidence, next prompts, and loop stopping.
+- `plan_review_fix_loop` and `record_loop_failure` make the Claude implement -> Codex review -> Claude fix cycle explicit and bounded.
 - `start_collab_run`, `get_collab_run`, `advance_collab_run`, and `record_run_evidence` provide a resumable task state machine. Typical states are `clarifying`, `planned`, `approved`, `implementing`, `validating`, `codex_reviewing`, `fixing`, `final_gate`, `done`, and `canceled`.
 - `create_plan`, `revise_plan`, `approve_plan`, and `execute_approved_plan` support plan-first work. Execution is not prepared until a saved plan is approved.
 - `explain_pending_confirmation`, `approve_pending_call`, `deny_pending_call`, and `request_plan_change` turn HITL approvals into explicit user choices.
@@ -167,6 +186,76 @@ The gateway now has a middle layer between raw cross-agent calls and fully manua
 - `get_dashboard_brief` is a compact status view; `get_dashboard_detail` includes pending confirmations, locks, project risk, recent audit entries, and quality hints.
 
 This layer is intentionally workflow-oriented rather than autonomy-oriented. It improves convenience and output quality while keeping risky execution behind approval gates.
+
+## Harness Output Contract
+
+Key project workflow tools now return a compatibility-preserving `harness` object and `nextPromptDrafts` object in addition to their original fields.
+
+`harness` contains:
+
+- `version`
+- `state`
+- `taskMode`
+- `summary`
+- `nextAction`
+- `requiredEvidence`
+- `blockingIssues`
+- `qualityGate`
+- `stopCondition`
+- `route`
+- `risk`
+
+`nextPromptDrafts` contains:
+
+- `nextActionPrompt`
+- `nextClaudePrompt`
+- `nextCodexPrompt`
+- `userFacingPromptDraft`
+
+This keeps every major step actionable for the human. The user can inspect the state, copy the next prompt into Claude or Codex, and see what evidence is still required before closeout.
+
+## Task Mode Presets
+
+Task modes tune routing, evidence, stop conditions, and quality expectations:
+
+- `bug_fix`
+- `feature_delivery`
+- `refactor`
+- `security_review`
+- `config_governance`
+- `docs_only`
+- `sandbox_experiment`
+
+Use `list_task_mode_presets` to inspect all modes, or `get_task_mode_preset` when a goal should be classified into one mode. Modes are advisory harnesses; they do not bypass HITL confirmation policy.
+
+`run_quality_gate` enforces the selected task mode's `requiredEvidence`. For example, `feature_delivery` and `config_governance` require recorded human approval evidence before closeout, while `bug_fix` focuses on validation, changed files, review findings, and rollback evidence.
+
+## Review/Fix Loop
+
+`plan_review_fix_loop` turns a complex task into a bounded loop:
+
+```text
+Clarify -> Approve -> Claude implement -> Codex review -> Claude fix -> Quality gate
+```
+
+The loop is bounded by:
+
+- `maxReviewFixRounds`
+- `maxFailures`
+- `stopWhenQualityGatePasses`
+- `requireHumanAfterHighRiskFinding`
+
+`evaluate_stop_condition` decides whether the loop should continue, stop for closeout, stop for repeated failure, or ask the human to resolve high-risk findings.
+
+High-risk human approval is evaluated before final closeout. A task with a passing quality gate but missing required human approval remains blocked with `needs_human`.
+
+`record_loop_failure` records failure evidence and returns recovery guidance without automatically retrying. This avoids hidden retry loops.
+
+For resumable runs, loop counters are persisted in `run.loop`:
+
+- `reviewFixRound` increments when a run enters `fixing`.
+- `failureCount` increments when `record_loop_failure` records a failure.
+- `lastFailureType` and `failures` preserve a compact recovery trail.
 
 ## Requirement Clarification Gate
 
@@ -187,19 +276,33 @@ Use `start_collab_run` for complex work that may span multiple agent turns. It w
 
 Allowed transitions are intentionally narrow:
 
-- `clarifying` -> `planned`, `blocked`
-- `planned` -> `approved`, `blocked`
-- `approved` -> `executing`, `blocked`
-- `executing` -> `reviewing`, `validating`, `blocked`, `rolled_back`
-- `reviewing` -> `executing`, `validating`, `blocked`
-- `validating` -> `completed`, `executing`, `blocked`
-- `blocked` -> `planned`, `rolled_back`
+- `draft` -> `clarifying`, `planned`, `canceled`
+- `clarifying` -> `planned`, `canceled`
+- `planned` -> `approved`, `clarifying`, `canceled`
+- `approved` -> `implementing`, `canceled`
+- `implementing` -> `validating`, `canceled`
+- `validating` -> `codex_reviewing`, `fixing`, `final_gate`, `canceled`
+- `codex_reviewing` -> `fixing`, `final_gate`, `canceled`
+- `fixing` -> `validating`, `codex_reviewing`, `final_gate`, `canceled`
+- `final_gate` -> `done`, `fixing`, `canceled`
 
 This keeps long tasks recoverable without pretending the gateway can infer human approval from conversation alone.
 
 ## Quality Evidence
 
 `run_quality_gate` accepts structured evidence, including validation command results, review evidence, changed files, and allowed file scope. A validation record with a non-zero `exitCode` fails the gate. A changed file outside `allowedFiles` also fails the gate.
+
+The normalized evidence schema uses:
+
+- `validation`
+- `changedFiles`
+- `reviewFindings`
+- `fixesApplied`
+- `rollbackPlan`
+- `screenshots`
+- `logs`
+- `humanApprovals`
+- `openRisks`
 
 The quality gate is not a substitute for tests; it is a closeout checklist that makes missing evidence visible before the task is called done.
 
@@ -216,6 +319,13 @@ High-risk calls return:
 ```
 
 The user or controlling client must call `confirm_cross_agent_call` with the exact text, then retry the original call with `confirmedCallId` and `confirmationText`.
+
+For day-to-day use, prefer the friendly approval layer:
+
+- `get_pending_action_card` shows the next approval card.
+- `approve_next_action` confirms the selected pending action and returns retry arguments.
+- `deny_next_action` cancels the selected pending action.
+- `revise_next_action` cancels the action and records what should change before retry.
 
 Confirmations are bound to a SHA-256 hash of the target, prompt, cwd, requested capability, declared files, tools, commands, intent, trace ID, parent call ID, and depth. A confirmation for one pending call cannot be reused for a different request.
 

@@ -13,6 +13,17 @@ The result is a practical collaboration system:
 - Codex acts as a sharp independent reviewer, planner, auditor, and cross-file reasoning partner.
 - The user keeps final control through clarification gates, approval cards, risk policies, quality evidence, and rollback notes.
 
+## Current Capability Snapshot
+
+The current gateway exposes 89 MCP tools organized around a user-governed delivery loop:
+
+- **User modes:** `solo_developer_safe`, `fast_local_iteration`, `config_governance`, `sandbox_autonomous`, and `enterprise_review`.
+- **Friendly approvals:** review the next pending action, approve it, deny it, or request revision without manually stitching low-level confirmation calls.
+- **Task harness:** every major workflow step returns state, risk, required evidence, blocking issues, stop conditions, and next prompt drafts.
+- **Loop automation:** `advance_task_loop` moves a resumable run to the next safe node while stopping for missing evidence, pending approval, repeated failure, or high-risk human review.
+- **Quality evidence:** validation, changed files, review findings, fixes, rollback plans, approvals, logs, screenshots, and open risks are tracked before closeout.
+- **Desktop boundary:** Codex Desktop is treated as a human-facing workspace; Codex CLI/MCP and Claude Code CLI/MCP are the programmable execution surfaces.
+
 ## Why This Exists
 
 Modern coding agents are powerful, but real projects need more than raw power.
@@ -61,6 +72,16 @@ The gateway supports three operating modes:
 - `danger`: gateway confirmation checks are disabled after a bound confirmation.
 
 `danger` mode is intentionally hard to enter. Enabling it requires a pending confirmation tied to the exact request hash. Use it only in disposable sandboxes.
+
+For easier setup, user-facing modes wrap these policies:
+
+- `solo_developer_safe` for daily real-project work.
+- `fast_local_iteration` for local non-production iteration.
+- `config_governance` for Claude/Codex/MCP/settings work.
+- `sandbox_autonomous` for disposable experiments.
+- `enterprise_review` for shared or compliance-sensitive repositories.
+
+Use `list_user_mode_presets` to compare them and `apply_user_mode_preset` to configure one for a project.
 
 ### Requirement Clarification Gate
 
@@ -118,6 +139,30 @@ The gateway includes closeout checks for:
 
 It does not replace tests. It makes missing evidence visible before a task is called complete.
 
+### Harness And Loop Operating System
+
+The gateway now adds a consistent Harness layer around complex project work.
+
+Key workflow tools return:
+
+- `harness`: current state, task mode, next action, required evidence, blocking issues, quality gate, route, risk, and stop condition.
+- `nextPromptDrafts`: copy-ready prompts for the user, Claude Code, and Codex.
+
+This turns each step into an explicit operating loop:
+
+```text
+Clarify -> Plan -> Human approve -> Claude implement -> Codex review -> Claude fix -> Quality gate -> Closeout
+```
+
+The loop is bounded by stop conditions:
+
+- max review/fix rounds,
+- max repeated failures,
+- quality gate pass,
+- high-risk findings that require human approval.
+
+The goal is not endless autonomy. The goal is a disciplined loop that knows when to continue, when to stop, and when to hand control back to the human.
+
 ### Task Archives
 
 The plugin also includes Claude Code slash-command workflows for file-based collaboration archives:
@@ -160,7 +205,9 @@ Each archive can contain:
   project runtime                       planning / audit
 ```
 
-The gateway coordinates programmable MCP/CLI surfaces. It does **not** remote-control an already-open Codex Desktop chat window. Codex Desktop can still serve as the human-facing workspace when configured to load this gateway for the trusted project.
+The gateway coordinates programmable MCP/CLI surfaces. It does **not** remote-control an already-open Codex Desktop chat window.
+
+Current boundary: this project can connect Claude Code CLI/MCP capabilities with Codex MCP/CLI capabilities. Codex Desktop is best treated as the human-facing workspace that can load this gateway for a trusted project, not as a background API that can be fully remote-controlled.
 
 Shared task archives, confirmation records, audit events, and quality evidence are the durable coordination layer.
 
@@ -249,10 +296,12 @@ Preferred high-signal flow:
 
 ```text
 analyze_requirement_clarity
+build_execution_harness
 create_plan
 approve_plan
 execute_approved_plan
 record_run_evidence
+plan_review_fix_loop
 run_quality_gate
 summarize_final_result
 ```
@@ -287,6 +336,8 @@ These commands create structured task archives and paste-ready handoff/review pr
 Core control:
 
 - `get_policy`
+- `list_user_mode_presets`
+- `apply_user_mode_preset`
 - `set_policy_mode`
 - `classify_risk`
 - `health_check`
@@ -309,6 +360,10 @@ Human approval:
 - `explain_pending_confirmation`
 - `approve_pending_call`
 - `deny_pending_call`
+- `get_pending_action_card`
+- `approve_next_action`
+- `deny_next_action`
+- `revise_next_action`
 
 Project workflow:
 
@@ -324,6 +379,14 @@ Plan and run state:
 
 - `analyze_requirement_clarity`
 - `request_clarification`
+- `list_task_mode_presets`
+- `get_task_mode_preset`
+- `build_execution_harness`
+- `build_next_prompt_draft`
+- `get_evidence_schema`
+- `evaluate_stop_condition`
+- `plan_review_fix_loop`
+- `record_loop_failure`
 - `create_plan`
 - `revise_plan`
 - `approve_plan`
@@ -331,7 +394,10 @@ Plan and run state:
 - `start_collab_run`
 - `get_collab_run`
 - `advance_collab_run`
+- `advance_task_loop`
 - `record_run_evidence`
+- `record_human_approval`
+- `explain_missing_evidence`
 
 Quality and reporting:
 

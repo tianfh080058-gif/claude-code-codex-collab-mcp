@@ -123,6 +123,8 @@ async function main() {
     "call_claude_cli",
     "classify_risk",
     "health_check",
+    "list_user_mode_presets",
+    "apply_user_mode_preset",
     "acquire_file_lock",
     "get_collab_status",
     "profile_project_risk",
@@ -131,6 +133,14 @@ async function main() {
     "start_project_task",
     "build_project_context_pack",
     "run_quality_gate",
+    "list_task_mode_presets",
+    "get_task_mode_preset",
+    "build_execution_harness",
+    "build_next_prompt_draft",
+    "get_evidence_schema",
+    "evaluate_stop_condition",
+    "plan_review_fix_loop",
+    "record_loop_failure",
     "get_user_dashboard",
     "summarize_final_result",
     "implement_with_review",
@@ -139,11 +149,18 @@ async function main() {
     "start_collab_run",
     "get_collab_run",
     "advance_collab_run",
+    "advance_task_loop",
     "record_run_evidence",
+    "record_human_approval",
+    "explain_missing_evidence",
     "create_plan",
     "approve_plan",
     "execute_approved_plan",
     "explain_pending_confirmation",
+    "get_pending_action_card",
+    "approve_next_action",
+    "deny_next_action",
+    "revise_next_action",
     "propose_changes",
     "select_quality_template",
     "explain_quality_failures",
@@ -159,6 +176,11 @@ async function main() {
   const risk = await callTool("classify_risk", { prompt: "modify hooks and settings.local.json" });
   if (risk.riskLevel !== "L5") throw new Error(`expected L5 risk, got ${risk.riskLevel}`);
 
+  const userModes = await callTool("list_user_mode_presets");
+  if (!userModes.userModes?.solo_developer_safe || !userModes.userModes?.enterprise_review) {
+    throw new Error("expected user-facing mode presets");
+  }
+
   const claudeToolRisk = await callTool("classify_risk", {
     target: "claude",
     tools: ["Bash"],
@@ -170,6 +192,70 @@ async function main() {
   if (unclear.status !== "needs_clarification") throw new Error("expected unclear task to need clarification");
   const clarify = await callTool("request_clarification", { goal: "fix it" });
   if (!clarify.questions?.length) throw new Error("expected clarification questions");
+  if (!clarify.nextPromptDrafts?.userFacingPromptDraft) throw new Error("expected clarification prompt draft");
+
+  const presets = await callTool("list_task_mode_presets");
+  if (!presets.presets?.feature_delivery?.requiredEvidence?.length) throw new Error("expected task mode presets");
+  const configPreset = await callTool("get_task_mode_preset", { goal: "Audit MCP permission changes", files: ["settings.local.json"] });
+  if (configPreset.preset.name !== "security_review" && configPreset.preset.name !== "config_governance") {
+    throw new Error(`expected security/config preset, got ${configPreset.preset.name}`);
+  }
+  if (!configPreset.nextPromptDrafts?.nextCodexPrompt) throw new Error("expected preset Codex prompt draft");
+
+  const executionHarness = await callTool("build_execution_harness", {
+    goal: "Improve gateway loop harness",
+    taskMode: "feature_delivery",
+    files: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    successCriteria: ["Every key workflow returns next prompt drafts."],
+    validation: ["node --check plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    rollback: "Restore server from .backups.",
+  });
+  if (!executionHarness.executionHarness?.evidenceSchema?.types?.length) throw new Error("expected execution harness evidence schema");
+  if (!executionHarness.harness?.requiredEvidence?.includes("validation")) throw new Error("expected harness required validation evidence");
+  if (!executionHarness.nextPromptDrafts?.nextClaudePrompt) throw new Error("expected execution harness Claude prompt");
+
+  const promptDraft = await callTool("build_next_prompt_draft", {
+    goal: "Review gateway changes",
+    taskMode: "security_review",
+    files: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    validation: ["node verifier"],
+    rollback: "Restore backups.",
+    nextAction: "Ask Codex to review the risk model.",
+  });
+  if (!/Codex/.test(promptDraft.nextPromptDrafts?.nextCodexPrompt || "")) throw new Error("expected Codex next prompt draft");
+
+  const schema = await callTool("get_evidence_schema", { taskMode: "feature_delivery" });
+  if (!schema.types?.some((item) => item.type === "humanApprovals")) throw new Error("expected normalized evidence schema");
+
+  const stopPassed = await callTool("evaluate_stop_condition", {
+    taskMode: "feature_delivery",
+    qualityGate: { done: true },
+  });
+  if (stopPassed.decision !== "ready_for_closeout") throw new Error("expected quality pass stop condition");
+
+  const stopHuman = await callTool("evaluate_stop_condition", {
+    taskMode: "security_review",
+    phase: "review",
+    risk: { riskLevel: "L5", reasons: ["high risk"], sensitive: true },
+    evidence: {},
+  });
+  if (stopHuman.decision !== "needs_human") throw new Error("expected high-risk stop condition to need human");
+  const stopHighRiskCloseout = await callTool("evaluate_stop_condition", {
+    taskMode: "security_review",
+    phase: "final_gate",
+    risk: { riskLevel: "L5", reasons: ["high risk"], sensitive: true },
+    qualityGate: { done: true },
+    evidence: {},
+  });
+  if (stopHighRiskCloseout.decision !== "needs_human") throw new Error("expected high-risk closeout to require human first");
+  const stopApprovedHighRiskCloseout = await callTool("evaluate_stop_condition", {
+    taskMode: "security_review",
+    phase: "final_gate",
+    risk: { riskLevel: "L5", reasons: ["high risk"], sensitive: true },
+    qualityGate: { done: true },
+    evidence: { humanApprovals: [{ approvedBy: "verify" }] },
+  });
+  if (stopApprovedHighRiskCloseout.decision !== "ready_for_closeout") throw new Error("expected approved high-risk closeout to pass");
 
   const blockedWorkflow = await callTool("implement_with_review", {
     goal: "Fix vague issue",
@@ -184,12 +270,19 @@ async function main() {
   if (dangerRequest.status !== "pending_confirmation") throw new Error("expected danger mode to require bound confirmation");
   const policyAfterDangerRequest = await callTool("get_policy");
   if (policyAfterDangerRequest.mode === "danger") throw new Error("danger mode should not be enabled without confirmed retry");
+  const revisedDanger = await callTool("revise_next_action", {
+    callId: dangerRequest.callId,
+    requestedChange: "Keep auto mode during verification.",
+  });
+  if (revisedDanger.status !== "revision_requested") throw new Error("expected revise_next_action to record revision");
 
   const pendingCall = await callTool("call_codex", {
     prompt: "modify hooks and settings.local.json",
     cwd: projectRoot,
   });
   if (pendingCall.status !== "pending_confirmation") throw new Error("expected pending confirmation for high-risk call");
+  const pendingCard = await callTool("get_pending_action_card", { callId: pendingCall.callId });
+  if (pendingCard.callId !== pendingCall.callId || !pendingCard.options?.length) throw new Error("expected pending action card");
 
   const claudeToolPending = await callTool("call_claude_tool", {
     toolName: "Bash",
@@ -197,6 +290,8 @@ async function main() {
     cwd: projectRoot,
   });
   if (claudeToolPending.status !== "pending_confirmation") throw new Error("expected Claude Bash tool call to require confirmation");
+  const deniedClaudeTool = await callTool("deny_next_action", { callId: claudeToolPending.callId, reason: "Verifier denies direct Bash call." });
+  if (deniedClaudeTool.status !== "canceled") throw new Error("expected deny_next_action to cancel pending call");
 
   const approvalCard = await callTool("explain_pending_confirmation", { callId: pendingCall.callId });
   if (!approvalCard.requiredConfirmationText) throw new Error("expected approval card confirmation text");
@@ -216,6 +311,10 @@ async function main() {
   });
   if (reusedConfirmation.status !== "pending_confirmation") {
     throw new Error("expected mismatched confirmed call to require a fresh confirmation");
+  }
+  const friendlyApproval = await callTool("approve_next_action", { callId: reusedConfirmation.callId, approvedBy: "verify" });
+  if (friendlyApproval.status !== "confirmed" || !friendlyApproval.retry?.confirmationText) {
+    throw new Error("expected approve_next_action to confirm and return retry args");
   }
 
   const lock = await callTool("acquire_file_lock", {
@@ -253,6 +352,12 @@ async function main() {
     intent: "read_only",
   });
   if (projectPolicyPending.status !== "pending_confirmation") throw new Error("expected project-level cautious policy to require confirmation");
+  const userModePending = await callTool("apply_user_mode_preset", {
+    userMode: "enterprise_review",
+    projectDir: externalProjectDir,
+    overwrite: true,
+  });
+  if (userModePending.status !== "pending_confirmation") throw new Error("expected external user mode setup to require confirmation");
 
   const externalArchivePending = await callTool("create_task_archive", {
     goal: "Verify external project archive",
@@ -288,22 +393,60 @@ async function main() {
   if (!context.conventions) throw new Error("expected project context pack");
 
   const gate = await callTool("run_quality_gate", {
+    taskMode: "feature_delivery",
     goal: "Verify quality gate",
     validationSummary: "verifier passed",
-    evidence: { validation: [{ command: "node verifier", exitCode: 0 }] },
+    changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    evidence: {
+      validation: [{ command: "node verifier", exitCode: 0 }],
+      changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+      reviewFindings: [{ severity: "low", status: "accepted" }],
+      rollbackPlan: ["Restore backup."],
+      humanApprovals: [{ approvedBy: "verify" }],
+    },
     reviewed: true,
     reviewSummary: "self-check",
     rollbackSummary: "backups available",
     openRisks: [],
   });
   if (!gate.done) throw new Error("expected quality gate to pass with complete evidence");
+  if (!gate.harness?.qualityGate?.done) throw new Error("expected quality gate harness");
+  const missingEvidenceGate = await callTool("run_quality_gate", {
+    taskMode: "feature_delivery",
+    goal: "Verify required evidence gate",
+    validationSummary: "verifier passed",
+    changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    evidence: {
+      validation: [{ command: "node verifier", exitCode: 0 }],
+      changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+      reviewFindings: [{ severity: "low", status: "accepted" }],
+      rollbackPlan: ["Restore backup."],
+    },
+    reviewed: true,
+    reviewSummary: "self-check",
+    rollbackSummary: "backups available",
+    openRisks: [],
+  });
+  if (missingEvidenceGate.done) throw new Error("expected missing required human approval evidence to fail quality gate");
+  if (!missingEvidenceGate.evidence?.missingRequiredEvidence?.includes("humanApprovals")) {
+    throw new Error("expected quality gate to report missing humanApprovals evidence");
+  }
 
   const dashboard = await callTool("get_user_dashboard", { projectDir: projectRoot, recentLimit: 5 });
   if (!dashboard.nextBestAction) throw new Error("expected dashboard next best action");
 
   const finalResult = await callTool("summarize_final_result", {
+    taskMode: "feature_delivery",
     goal: "Verify final result summary",
     summary: "Verification complete",
+    changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    evidence: {
+      validation: [{ command: "node verifier", exitCode: 0 }],
+      changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+      reviewFindings: [{ severity: "low", status: "accepted" }],
+      rollbackPlan: ["Restore backup."],
+      humanApprovals: [{ approvedBy: "verify" }],
+    },
     validationSummary: "verifier passed",
     reviewed: true,
     reviewSummary: "self-check",
@@ -311,6 +454,7 @@ async function main() {
     openRisks: [],
   });
   if (!finalResult.qualityGate?.done) throw new Error("expected final result quality gate to pass");
+  if (!finalResult.nextPromptDrafts?.nextActionPrompt) throw new Error("expected final result prompt draft");
 
   const plan = await callTool("create_plan", {
     goal: "Improve gateway approval UX",
@@ -334,8 +478,73 @@ async function main() {
     summary: "validation passed",
   });
   if (!runEvidence.run.evidence?.length) throw new Error("expected run evidence to be recorded");
+  if (!runEvidence.harness?.nextAction) throw new Error("expected run evidence harness next action");
   const readRun = await callTool("get_collab_run", { runId: run.run.runId });
   if (readRun.runId !== run.run.runId) throw new Error("expected run readback");
+  const approvalEvidence = await callTool("record_human_approval", {
+    runId: run.run.runId,
+    approvedBy: "verify",
+    scope: "quality gate evidence",
+    decision: "approved",
+  });
+  if (approvalEvidence.status !== "recorded") throw new Error("expected human approval evidence to be recorded");
+  const missingEvidence = await callTool("explain_missing_evidence", {
+    runId: run.run.runId,
+    taskMode: "feature_delivery",
+  });
+  if (!missingEvidence.qualityGate || !Array.isArray(missingEvidence.suggestions)) throw new Error("expected missing evidence explanation");
+
+  const loopRun = await callTool("start_collab_run", { planId: plan.plan.planId });
+  const loopApproved = await callTool("advance_task_loop", {
+    runId: loopRun.run.runId,
+    decision: "approve",
+    actor: "verify",
+    ignorePending: true,
+  });
+  if (loopApproved.run.state !== "approved") throw new Error("expected advance_task_loop to approve planned run");
+  const loopImplementing = await callTool("advance_task_loop", { runId: loopRun.run.runId, actor: "verify", ignorePending: true });
+  if (loopImplementing.run.state !== "implementing") throw new Error("expected advance_task_loop to enter implementing");
+  const loopValidating = await callTool("advance_task_loop", {
+    runId: loopRun.run.runId,
+    actor: "verify",
+    ignorePending: true,
+    evidence: {
+      changedFiles: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+      validation: [{ command: "node verifier", exitCode: 0 }],
+    },
+  });
+  if (loopValidating.run.state !== "validating") throw new Error("expected advance_task_loop to enter validating after evidence");
+  await callTool("advance_collab_run", { runId: run.run.runId, nextState: "implementing", actor: "verify", summary: "implementation started" });
+  await callTool("advance_collab_run", { runId: run.run.runId, nextState: "validating", actor: "verify", summary: "validation started" });
+  await callTool("advance_collab_run", { runId: run.run.runId, nextState: "codex_reviewing", actor: "verify", summary: "review started" });
+  const fixingRun = await callTool("advance_collab_run", { runId: run.run.runId, nextState: "fixing", actor: "verify", summary: "fix accepted findings" });
+  if (fixingRun.run.loop?.reviewFixRound !== 1) throw new Error("expected review/fix round to persist on fixing transition");
+
+  const loopPlan = await callTool("plan_review_fix_loop", {
+    runId: run.run.runId,
+    taskMode: "feature_delivery",
+    files: ["plugins/codex-claude-collab/servers/cross-agent-gateway.mjs"],
+    validation: ["node verifier"],
+    rollback: "Restore backup.",
+    evidence: { validation: [{ command: "node verifier", exitCode: 0 }] },
+  });
+  if (!loopPlan.loop?.steps?.some((step) => step.id === "review")) throw new Error("expected review/fix loop steps");
+  if (loopPlan.loop?.reviewFixRound !== 1) throw new Error("expected loop plan to read persisted review/fix round");
+  if (!loopPlan.nextPromptDrafts?.nextCodexPrompt) throw new Error("expected loop Codex prompt");
+
+  const loopFailure = await callTool("record_loop_failure", {
+    runId: run.run.runId,
+    step: "codex_review",
+    error: "backend timed out",
+    failureType: "timeout",
+    failureCount: 1,
+    retryable: true,
+  });
+  if (!loopFailure.recoverySteps?.length) throw new Error("expected loop failure recovery steps");
+  if (!loopFailure.harness?.stopCondition) throw new Error("expected loop failure stop condition");
+  const failedRun = await callTool("get_collab_run", { runId: run.run.runId });
+  if (failedRun.loop?.failureCount !== 2) throw new Error("expected loop failure count to persist");
+  if (failedRun.loop?.lastFailureType !== "timeout") throw new Error("expected loop last failure type to persist");
 
   const timeline = await callTool("get_task_timeline", { taskId: plan.plan.planId });
   if (!timeline.events?.length) throw new Error("expected plan timeline event");
